@@ -1,0 +1,36 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: aquaculture-backend
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - DATABASE_URL=sqlite:///./data/aquaculture.db
+    volumes:
+      - sqlite_data:/app/data
+    networks:
+      - aquaculture-network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: aquaculture-frontend
+    restart: unless-stopped
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - aquaculture-network
+
+volumes:
+  sqlite_data:
+    driver: local
+
+networks:
+  aquaculture-network:
+    driver: bridge

@@ -4,8 +4,9 @@ from sqlalchemy import func
 from typing import List, Optional
 from datetime import date
 from ..database import get_db
-from ..models import Batch, Pond, StockingRecord, FeedingRecord, CostRecord, HarvestSale, WaterQualityRecord, MedicationRecord
+from ..models import Batch, Pond, StockingRecord, FeedingRecord, HarvestSale, WaterQualityRecord, MedicationRecord
 from ..schemas import CultureCycleAnalysis, BatchTraceability, BatchInfo, PondInfo
+from ..services import cost_service as cost_svc
 
 router = APIRouter(
     prefix="/api/analysis",
@@ -31,11 +32,12 @@ def analyze_cycle(batch_id: int, db: Session = Depends(get_db)):
     feed_total = db.query(func.sum(FeedingRecord.feed_quantity)).filter(
         FeedingRecord.batch_id == batch.id
     ).scalar() or 0
-    
-    total_cost = db.query(func.sum(CostRecord.amount)).filter(
-        CostRecord.batch_id == batch.id
-    ).scalar() or 0
-    
+
+    # 成本一律来自统一有效分录集合(status=active, 含税费/折让/退款净额)
+    cost_breakdown = cost_svc.sum_by_type(db, batch_id=batch.id)
+    total_cost_cents = sum(cost_breakdown.values())
+    total_cost = total_cost_cents / 100
+
     total_revenue = db.query(func.sum(HarvestSale.total_amount)).filter(
         HarvestSale.batch_id == batch.id
     ).scalar() or 0
@@ -61,26 +63,17 @@ def analyze_cycle(batch_id: int, db: Session = Depends(get_db)):
     
     profit = total_revenue - total_cost
     
-    costs = db.query(
-        CostRecord.cost_type,
-        func.sum(CostRecord.amount).label('total')
-    ).filter(
-        CostRecord.batch_id == batch.id
-    ).group_by(CostRecord.cost_type).all()
-    
-    cost_breakdown = {c.cost_type: c.total for c in costs}
-    
     known_types = ['feed', 'medicine', 'labor', 'electricity']
     other_cost = sum(
-        amount for cost_type, amount in cost_breakdown.items() 
+        cents / 100 for cost_type, cents in cost_breakdown.items()
         if cost_type not in known_types
     )
-    
+
     cost_summary_dict = {
-        "feed_cost": cost_breakdown.get('feed', 0),
-        "medicine_cost": cost_breakdown.get('medicine', 0),
-        "labor_cost": cost_breakdown.get('labor', 0),
-        "electricity_cost": cost_breakdown.get('electricity', 0),
+        "feed_cost": cost_breakdown.get('feed', 0) / 100,
+        "medicine_cost": cost_breakdown.get('medicine', 0) / 100,
+        "labor_cost": cost_breakdown.get('labor', 0) / 100,
+        "electricity_cost": cost_breakdown.get('electricity', 0) / 100,
         "other_cost": other_cost,
         "total_cost": total_cost
     }
@@ -150,9 +143,7 @@ def batch_traceability(batch_id: int, db: Session = Depends(get_db)):
         MedicationRecord.batch_id == batch.id
     ).all()
     
-    cost_records = db.query(CostRecord).filter(
-        CostRecord.batch_id == batch.id
-    ).all()
+    cost_records = cost_svc.query_active(db, batch_id=batch.id).all()
     
     harvest_sales = db.query(HarvestSale).filter(
         HarvestSale.batch_id == batch.id

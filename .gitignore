@@ -19,3 +19,12 @@ logs/
 
 # Docker
 *.pid
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Local SQLite databases
+*.db

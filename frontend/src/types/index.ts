@@ -79,18 +79,75 @@ export interface MedicationRecord {
   created_at: string;
 }
 
+export type CostType = 'feed' | 'medicine' | 'labor' | 'electricity' | 'other';
+export type AmountMode = 'derived' | 'direct';
+export type EntryKind = 'principal' | 'tax' | 'discount' | 'refund' | 'correction';
+export type CostStatus = 'active' | 'revoked';
+export type AdjustmentKind = 'tax' | 'discount' | 'refund';
+
 export interface CostRecord {
   id: number;
   batch_id: number;
   cost_date: string;
-  cost_type: string;
+  cost_type: CostType;
   amount: number;
+  amount_cents: number;
   description?: string;
   quantity?: number;
   unit?: string;
   unit_price?: number;
+  amount_mode: AmountMode;
+  entry_kind: EntryKind;
+  parent_id?: number;
+  status: CostStatus;
+  revoked_reason?: string;
+  version: number;
+  client_token?: string;
   notes?: string;
   created_at: string;
+  updated_at?: string;
+}
+
+export interface CostSummaryByTypeItem {
+  amount_cents: number;
+  amount: number;
+}
+
+export interface CostSummary {
+  total_cents: number;
+  total: number;
+  by_type: Record<CostType, CostSummaryByTypeItem>;
+  currency: string;
+  precision: number;
+}
+
+export interface CostAdjustmentInput {
+  entry_kind: AdjustmentKind;
+  amount: number;
+  cost_date?: string;
+  description?: string;
+  client_token?: string;
+}
+
+export interface CostRepairIssue {
+  record_id: number;
+  cost_type: string;
+  reason: string;
+  current_amount_cents?: number;
+  expected_amount_cents?: number;
+  fixable: boolean;
+}
+
+export interface CostRepairStatus {
+  run_key: string;
+  status: 'running' | 'completed' | 'failed';
+  last_id: number;
+  scanned: number;
+  repaired: number;
+  skipped: number;
+  message?: string;
+  started_at?: string;
+  finished_at?: string;
 }
 
 export interface HarvestSale {
@@ -107,7 +164,7 @@ export interface HarvestSale {
   created_at: string;
 }
 
-export interface CostSummary {
+export interface CycleCostSummary {
   feed_cost: number;
   medicine_cost: number;
   labor_cost: number;
@@ -139,7 +196,7 @@ export interface CultureCycleAnalysis {
   total_cost: number;
   total_revenue: number;
   profit: number;
-  cost_summary?: CostSummary;
+  cost_summary?: CycleCostSummary;
   feeding_summary?: FeedingSummary;
 }
 

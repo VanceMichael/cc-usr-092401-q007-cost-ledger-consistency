@@ -1,8 +1,10 @@
 import axios from 'axios';
 import type {
   Pond, Batch, StockingRecord, FeedingRecord, WaterQualityRecord,
-  MedicationRecord, CostRecord, HarvestSale, CultureCycleAnalysis,
-  CostSummary, FeedingSummary, BatchTraceability
+  MedicationRecord, CostRecord, CostSummary, CostAdjustmentInput,
+  CostRepairIssue, CostRepairStatus,
+  HarvestSale, CultureCycleAnalysis,
+  FeedingSummary, BatchTraceability
 } from '../types';
 
 const API_BASE_URL = '/api';
@@ -88,17 +90,56 @@ export const medicationRecordApi = {
   delete: (id: number) => api.delete(`/medication-records/${id}/`),
 };
 
+export interface CostRecordQuery {
+  batchId?: number;
+  costType?: string;
+  startDate?: string;
+  endDate?: string;
+  includeRevoked?: boolean;
+}
+
 export const costRecordApi = {
-  getAll: (batchId?: number, costType?: string) => 
-    api.get<CostRecord[]>('/cost-records/', { 
-      params: { batch_id: batchId, cost_type: costType } 
+  getAll: (query: CostRecordQuery = {}) =>
+    api.get<CostRecord[]>('/cost-records/', {
+      params: {
+        batch_id: query.batchId,
+        cost_type: query.costType,
+        start_date: query.startDate,
+        end_date: query.endDate,
+        include_revoked: query.includeRevoked || undefined,
+      }
     }),
   getById: (id: number) => api.get<CostRecord>(`/cost-records/${id}/`),
-  create: (data: Omit<CostRecord, 'id' | 'created_at'>) => 
+  create: (data: Partial<CostRecord> & {
+    batch_id: number; cost_date: string; cost_type: string;
+    client_token?: string;
+  }) =>
     api.post<CostRecord>('/cost-records/', data),
-  update: (id: number, data: Partial<CostRecord>) => 
+  // 更新必须携带 version 做乐观锁
+  update: (id: number, data: Partial<Omit<CostRecord, 'id'>> & { version: number }) =>
     api.put<CostRecord>(`/cost-records/${id}/`, data),
+  revoke: (id: number, reason?: string) =>
+    api.post<CostRecord>(`/cost-records/${id}/revoke/`, { reason }),
   delete: (id: number) => api.delete(`/cost-records/${id}/`),
+  addAdjustment: (id: number, data: CostAdjustmentInput) =>
+    api.post<CostRecord>(`/cost-records/${id}/adjustments/`, data),
+  summary: (query: CostRecordQuery = {}) =>
+    api.get<CostSummary>('/cost-records/summary/', {
+      params: {
+        batch_id: query.batchId,
+        cost_type: query.costType,
+        start_date: query.startDate,
+        end_date: query.endDate,
+      }
+    }),
+  repairScan: (params: { after_id?: number; limit?: number; batch_id?: number } = {}) =>
+    api.post<{ scanned_window: number; next_after_id: number; issues: CostRepairIssue[] }>(
+      '/cost-records/repair/scan', null, { params }
+    ),
+  repairRun: (data: { run_key: string; batch_size?: number; max_batches?: number }) =>
+    api.post<CostRepairStatus>('/cost-records/repair/run', data),
+  repairStatus: (runKey: string) =>
+    api.get<CostRepairStatus>(`/cost-records/repair/${runKey}/`),
 };
 
 export const harvestSaleApi = {

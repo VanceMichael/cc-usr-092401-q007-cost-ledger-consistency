@@ -1,6 +1,30 @@
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import date, datetime
+from decimal import Decimal
+
+
+def _finite_number(value, field: str):
+    if value is None:
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"{field}不能是布尔值")
+    try:
+        d = Decimal(str(value))
+    except Exception:
+        raise ValueError(f"{field}不是合法数字")
+    if not d.is_finite():
+        raise ValueError(f"{field}必须是有限数")
+    return value
+
+
+def _non_negative(value, field: str):
+    value = _finite_number(value, field)
+    if value is None:
+        return None
+    if Decimal(str(value)) < 0:
+        raise ValueError(f"{field}不能为负数")
+    return value
 
 class PondBase(BaseModel):
     name: str
@@ -190,15 +214,24 @@ class CostRecordBase(BaseModel):
     batch_id: int
     cost_date: date
     cost_type: str
-    amount: float
+    # amount 对 derived 类型可空(由数量×单价计算);最终金额由后端派生
+    amount: Optional[float] = None
     description: Optional[str] = None
     quantity: Optional[float] = None
     unit: Optional[str] = None
     unit_price: Optional[float] = None
     notes: Optional[str] = None
+    client_token: Optional[str] = Field(default=None, max_length=64)
+
+    @field_validator("amount", "quantity", "unit_price")
+    @classmethod
+    def _check_numbers(cls, v, info):
+        return _non_negative(v, info.field_name)
+
 
 class CostRecordCreate(CostRecordBase):
     pass
+
 
 class CostRecordUpdate(BaseModel):
     batch_id: Optional[int] = None
@@ -210,13 +243,105 @@ class CostRecordUpdate(BaseModel):
     unit: Optional[str] = None
     unit_price: Optional[float] = None
     notes: Optional[str] = None
+    # 乐观锁:必须回传当前版本
+    version: int
 
-class CostRecordResponse(CostRecordBase):
+    @field_validator("amount", "quantity", "unit_price")
+    @classmethod
+    def _check_numbers(cls, v, info):
+        return _non_negative(v, info.field_name)
+
+
+class CostRecordResponse(BaseModel):
     id: int
+    batch_id: int
+    cost_date: date
+    cost_type: str
+    amount: float
+    amount_cents: int
+    description: Optional[str] = None
+    quantity: Optional[float] = None
+    unit: Optional[str] = None
+    unit_price: Optional[float] = None
+    amount_mode: str
+    entry_kind: str
+    parent_id: Optional[int] = None
+    status: str
+    revoked_reason: Optional[str] = None
+    version: int
+    client_token: Optional[str] = None
+    notes: Optional[str] = None
     created_at: datetime
+    updated_at: Optional[datetime] = None
 
     class Config:
-        orm_mode = True
+        from_attributes = True
+
+
+class CostAdjustmentCreate(BaseModel):
+    """税费/折让/退款:关联原分录,不覆盖原账。amount 恒为非负,方向由 kind 决定。"""
+    entry_kind: str
+    amount: float
+    cost_date: Optional[date] = None
+    description: Optional[str] = None
+    client_token: Optional[str] = Field(default=None, max_length=64)
+
+    @field_validator("amount")
+    @classmethod
+    def _check_amount(cls, v):
+        return _non_negative(v, "金额")
+
+
+class CostRevokeRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+class CostTypeSummaryItem(BaseModel):
+    type: str
+    amount_cents: int
+    amount: float
+    count: int
+
+
+class CostSummaryResponse(BaseModel):
+    total_cents: int
+    total: float
+    by_type: dict
+    currency: str = "CNY"
+    precision: int = 2
+
+
+class CostRepairIssue(BaseModel):
+    record_id: int
+    cost_type: str
+    reason: str
+    current_amount_cents: Optional[int] = None
+    expected_amount_cents: Optional[int] = None
+    fixable: bool
+
+
+class CostRepairScanResponse(BaseModel):
+    scanned_window: int
+    issues: List[CostRepairIssue]
+    next_after_id: int
+
+
+class CostRepairRequest(BaseModel):
+    run_key: str = Field(max_length=64)
+    batch_size: int = Field(default=200, ge=1, le=5000)
+    max_batches: Optional[int] = Field(default=None, ge=1)
+
+
+class CostRepairStatusResponse(BaseModel):
+    run_key: str
+    status: str
+    last_id: int
+    scanned: int
+    repaired: int
+    skipped: int
+    message: Optional[str] = None
+    started_at: Optional[datetime] = None
+    finished_at: Optional[datetime] = None
 
 class HarvestSaleBase(BaseModel):
     batch_id: int

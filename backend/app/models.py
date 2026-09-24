@@ -1,5 +1,5 @@
-from sqlalchemy import Column, Integer, String, Float, Date, DateTime, ForeignKey, Text
-from sqlalchemy.orm import relationship
+from sqlalchemy import Column, Integer, String, Float, Date, DateTime, ForeignKey, Text, UniqueConstraint
+from sqlalchemy.orm import relationship, backref
 from datetime import datetime
 from .database import Base
 
@@ -115,15 +115,68 @@ class CostRecord(Base):
     batch_id = Column(Integer, ForeignKey("batches.id"), nullable=False)
     cost_date = Column(Date, nullable=False, comment="费用日期")
     cost_type = Column(String(50), nullable=False, comment="费用类型: feed, medicine, labor, electricity, other")
-    amount = Column(Float, nullable=False, comment="金额(元)")
+    # amount 为历史浮点列,保留兼容;amount_cents 是唯一参与汇总的规范金额(分)
+    amount = Column(Float, nullable=False, comment="金额(元), 与 amount_cents 同步")
+    amount_cents = Column(Integer, nullable=True, comment="规范金额(分), 唯一参与汇总")
     description = Column(String(500), comment="费用描述")
     quantity = Column(Float, comment="数量")
     unit = Column(String(20), comment="单位")
     unit_price = Column(Float, comment="单价")
+    # 金额来源: derived=数量×单价; direct=直接金额
+    amount_mode = Column(String(10), nullable=False, default="direct", comment="derived / direct")
+    # 分录性质: principal=原始费用; tax=税费; discount=折让; refund=退款; correction=修正补差
+    entry_kind = Column(String(10), nullable=False, default="principal",
+                        comment="principal/tax/discount/refund/correction")
+    # 调整/撤销链:税费、折让、退款以关联分录表达,不覆盖原账
+    parent_id = Column(Integer, ForeignKey("cost_records.id"), nullable=True, comment="关联原分录")
+    status = Column(String(10), nullable=False, default="active", comment="active / revoked")
+    revoked_reason = Column(String(200), nullable=True)
+    version = Column(Integer, nullable=False, default=1, comment="乐观锁版本号")
+    client_token = Column(String(64), nullable=True, comment="幂等键")
     notes = Column(Text, comment="备注")
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("client_token", name="uq_cost_records_client_token"),
+    )
 
     batch = relationship("Batch", back_populates="cost_records")
+    children = relationship("CostRecord", backref=backref("parent", remote_side="CostRecord.id"))
+
+
+class CostRepairRun(Base):
+    """历史不一致数据修复批次台账:同一条目只成功一次,可中断续跑。"""
+    __tablename__ = "cost_repair_runs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_key = Column(String(64), unique=True, nullable=False, index=True, comment="修复批次幂等键")
+    status = Column(String(20), nullable=False, default="running", comment="running/completed/failed")
+    last_id = Column(Integer, nullable=False, default=0, comment="已扫描到的最大记录 id(续跑游标)")
+    scanned = Column(Integer, nullable=False, default=0)
+    repaired = Column(Integer, nullable=False, default=0)
+    skipped = Column(Integer, nullable=False, default=0)
+    message = Column(String(500), nullable=True)
+    started_at = Column(DateTime, default=datetime.utcnow)
+    finished_at = Column(DateTime, nullable=True)
+
+
+class CostRepairLog(Base):
+    """单条修复记录:唯一约束防止同批次对同一分录重复入账。"""
+    __tablename__ = "cost_repair_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    run_key = Column(String(64), ForeignKey("cost_repair_runs.run_key"), nullable=False, index=True)
+    record_id = Column(Integer, nullable=False, index=True)
+    action = Column(String(20), nullable=False, comment="fixed_amount/noop")
+    old_amount_cents = Column(Integer, nullable=True)
+    new_amount_cents = Column(Integer, nullable=True)
+    detail = Column(String(500), nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow)
+
+    __table_args__ = (
+        UniqueConstraint("run_key", "record_id", name="uq_repair_log_run_record"),
+    )
 
 class HarvestSale(Base):
     __tablename__ = "harvest_sales"

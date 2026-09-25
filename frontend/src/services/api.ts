@@ -1,7 +1,8 @@
 import axios from 'axios';
 import type {
   Pond, Batch, StockingRecord, FeedingRecord, WaterQualityRecord,
-  MedicationRecord, CostRecord, HarvestSale, CultureCycleAnalysis,
+  MedicationRecord, CostRecord, CostAdjustment, CostRecordFilters,
+  CostSummaryResult, HarvestSale, CultureCycleAnalysis,
   CostSummary, FeedingSummary, BatchTraceability
 } from '../types';
 
@@ -89,16 +90,38 @@ export const medicationRecordApi = {
 };
 
 export const costRecordApi = {
-  getAll: (batchId?: number, costType?: string) => 
-    api.get<CostRecord[]>('/cost-records/', { 
-      params: { batch_id: batchId, cost_type: costType } 
+  getAll: (filters: CostRecordFilters = {}) =>
+    api.get<CostRecord[]>('/cost-records/', {
+      params: {
+        batch_id: filters.batchId,
+        cost_type: filters.costType,
+        start_date: filters.startDate,
+        end_date: filters.endDate,
+        include_voided: filters.includeVoided,
+      }
+    }),
+  getSummary: (filters: CostRecordFilters = {}) =>
+    api.get<CostSummaryResult>('/cost-records/summary/', {
+      params: {
+        batch_id: filters.batchId,
+        cost_type: filters.costType,
+        start_date: filters.startDate,
+        end_date: filters.endDate,
+      }
     }),
   getById: (id: number) => api.get<CostRecord>(`/cost-records/${id}/`),
-  create: (data: Omit<CostRecord, 'id' | 'created_at'>) => 
+  create: (data: Partial<CostRecord>) =>
     api.post<CostRecord>('/cost-records/', data),
-  update: (id: number, data: Partial<CostRecord>) => 
+  // 必须携带读取时的 version, 版本冲突返回 409
+  update: (id: number, data: Partial<CostRecord> & { version: number }) =>
     api.put<CostRecord>(`/cost-records/${id}/`, data),
-  delete: (id: number) => api.delete(`/cost-records/${id}/`),
+  // 税费/折让/退款: 关联分录, 不覆盖原账
+  addAdjustment: (id: number, data: CostAdjustment) =>
+    api.post<CostRecord>(`/cost-records/${id}/adjustments/`, data),
+  getAdjustments: (id: number) =>
+    api.get<CostRecord[]>(`/cost-records/${id}/adjustments/`),
+  // 撤销代替物理删除
+  void: (id: number) => api.post<CostRecord>(`/cost-records/${id}/void/`),
 };
 
 export const harvestSaleApi = {

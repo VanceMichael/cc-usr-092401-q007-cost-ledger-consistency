@@ -301,7 +301,9 @@ const Analysis: React.FC = () => {
                           <tr key={idx}>
                             <td>{record.cost_date}</td>
                             <td>{record.cost_type}</td>
-                            <td className="text-red-600">¥{record.amount}</td>
+                            <td className={record.effective_amount != null && record.effective_amount < 0 ? 'text-green-600' : 'text-red-600'}>
+                              ¥{record.effective_amount ?? record.amount}
+                            </td>
                           </tr>
                         ))}
                       </tbody>

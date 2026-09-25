@@ -6,6 +6,7 @@ from datetime import date
 from ..database import get_db
 from ..models import Batch, Pond, StockingRecord, FeedingRecord, CostRecord, HarvestSale, WaterQualityRecord, MedicationRecord
 from ..schemas import CultureCycleAnalysis, BatchTraceability, BatchInfo, PondInfo
+from .. import cost_service
 
 router = APIRouter(
     prefix="/api/analysis",
@@ -31,11 +32,13 @@ def analyze_cycle(batch_id: int, db: Session = Depends(get_db)):
     feed_total = db.query(func.sum(FeedingRecord.feed_quantity)).filter(
         FeedingRecord.batch_id == batch.id
     ).scalar() or 0
-    
-    total_cost = db.query(func.sum(CostRecord.amount)).filter(
-        CostRecord.batch_id == batch.id
-    ).scalar() or 0
-    
+
+    # 周期利润与成本汇总必须基于同一有效分录集合(排除已撤销, 折让/退款带符号)
+    cost_entries = cost_service.effective_cost_query(db, batch_id=batch.id).all()
+    cost_totals = cost_service.summarize_entries(cost_entries)
+    total_cost = cost_totals["total"]
+    cost_breakdown = cost_totals["by_type"]
+
     total_revenue = db.query(func.sum(HarvestSale.total_amount)).filter(
         HarvestSale.batch_id == batch.id
     ).scalar() or 0
@@ -60,16 +63,7 @@ def analyze_cycle(batch_id: int, db: Session = Depends(get_db)):
         yield_per_mu = harvest_weight / pond.area
     
     profit = total_revenue - total_cost
-    
-    costs = db.query(
-        CostRecord.cost_type,
-        func.sum(CostRecord.amount).label('total')
-    ).filter(
-        CostRecord.batch_id == batch.id
-    ).group_by(CostRecord.cost_type).all()
-    
-    cost_breakdown = {c.cost_type: c.total for c in costs}
-    
+
     known_types = ['feed', 'medicine', 'labor', 'electricity']
     other_cost = sum(
         amount for cost_type, amount in cost_breakdown.items() 
@@ -150,8 +144,8 @@ def batch_traceability(batch_id: int, db: Session = Depends(get_db)):
         MedicationRecord.batch_id == batch.id
     ).all()
     
-    cost_records = db.query(CostRecord).filter(
-        CostRecord.batch_id == batch.id
+    cost_records = cost_service.effective_cost_query(db, batch_id=batch.id).order_by(
+        CostRecord.cost_date, CostRecord.id
     ).all()
     
     harvest_sales = db.query(HarvestSale).filter(
@@ -210,7 +204,9 @@ def batch_traceability(batch_id: int, db: Session = Depends(get_db)):
                 "cost_date": r.cost_date,
                 "cost_type": r.cost_type,
                 "amount": r.amount,
-                "description": r.description
+                "description": r.description,
+                "entry_kind": r.entry_kind,
+                "effective_amount": float(cost_service.signed_amount(r)),
             } for r in cost_records
         ],
         harvest_sales=[

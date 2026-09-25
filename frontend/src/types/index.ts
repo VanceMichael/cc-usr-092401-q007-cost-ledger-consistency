@@ -90,7 +90,34 @@ export interface CostRecord {
   unit?: string;
   unit_price?: number;
   notes?: string;
+  entry_kind: 'expense' | 'tax' | 'allowance' | 'refund';
+  status: 'active' | 'voided';
+  version: number;
+  parent_id?: number;
+  effective_amount: number;
   created_at: string;
+}
+
+export interface CostAdjustment {
+  kind: 'tax' | 'allowance' | 'refund';
+  amount: number;
+  adjustment_date: string;
+  description?: string;
+  notes?: string;
+}
+
+export interface CostSummaryResult {
+  total: number;
+  count: number;
+  by_type: Record<string, number>;
+}
+
+export interface CostRecordFilters {
+  batchId?: number;
+  costType?: string;
+  startDate?: string;
+  endDate?: string;
+  includeVoided?: boolean;
 }
 
 export interface HarvestSale {
@@ -182,6 +209,8 @@ export interface CostRecordTrace {
   cost_type: string;
   amount: number;
   description?: string;
+  entry_kind?: string;
+  effective_amount?: number;
 }
 
 export interface HarvestSaleTrace {

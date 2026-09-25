@@ -115,15 +115,35 @@ class CostRecord(Base):
     batch_id = Column(Integer, ForeignKey("batches.id"), nullable=False)
     cost_date = Column(Date, nullable=False, comment="费用日期")
     cost_type = Column(String(50), nullable=False, comment="费用类型: feed, medicine, labor, electricity, other")
-    amount = Column(Float, nullable=False, comment="金额(元)")
+    amount = Column(Float, nullable=False, comment="金额(元), 派生类型由数量*单价计算")
     description = Column(String(500), comment="费用描述")
     quantity = Column(Float, comment="数量")
     unit = Column(String(20), comment="单位")
     unit_price = Column(Float, comment="单价")
     notes = Column(Text, comment="备注")
+    entry_kind = Column(String(20), nullable=False, default="expense", server_default="expense",
+                        comment="分录类型: expense, tax, allowance, refund")
+    status = Column(String(20), nullable=False, default="active", server_default="active",
+                    comment="状态: active, voided(已撤销, 不参与汇总)")
+    version = Column(Integer, nullable=False, default=1, server_default="1",
+                     comment="乐观锁版本号, 每次修改+1")
+    parent_id = Column(Integer, ForeignKey("cost_records.id"), nullable=True,
+                       comment="关联的原始费用分录(税费/折让/退款)")
+    repair_revision = Column(Integer, nullable=True,
+                             comment="数据修复批次号, 用于迁移幂等")
     created_at = Column(DateTime, default=datetime.utcnow)
 
     batch = relationship("Batch", back_populates="cost_records")
+    parent = relationship("CostRecord", remote_side=[id], foreign_keys=[parent_id])
+
+
+class CostMigrationState(Base):
+    """成本数据迁移/修复的进度与审计状态(键值存储), 保证可中断续跑且不重复入账。"""
+    __tablename__ = "cost_migration_state"
+
+    key = Column(String(50), primary_key=True)
+    value = Column(Text, nullable=False, default="")
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 class HarvestSale(Base):
     __tablename__ = "harvest_sales"

@@ -39,7 +39,7 @@ const Dashboard: React.FC = () => {
 
   const activeBatches = batches.filter(b => b.status === 'active');
   const totalArea = ponds.reduce((sum, p) => sum + p.area, 0);
-  const totalCost = costs.reduce((sum, c) => sum + c.amount, 0);
+  const totalCost = costs.reduce((sum, c) => sum + (c.effective_amount ?? c.amount), 0);
   const totalRevenue = sales.reduce((sum, s) => sum + (s.total_amount || 0), 0);
 
   const stats = [

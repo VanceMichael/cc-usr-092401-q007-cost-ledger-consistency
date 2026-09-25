@@ -1,5 +1,5 @@
-from pydantic import BaseModel
-from typing import Optional, List
+from pydantic import BaseModel, model_validator
+from typing import Optional, List, Dict
 from datetime import date, datetime
 
 class PondBase(BaseModel):
@@ -190,7 +190,9 @@ class CostRecordBase(BaseModel):
     batch_id: int
     cost_date: date
     cost_type: str
-    amount: float
+    # derived 类型(feed/medicine)由服务端按 数量*单价 计算, 客户端传入值会被忽略;
+    # direct 类型必须填写金额。
+    amount: Optional[float] = None
     description: Optional[str] = None
     quantity: Optional[float] = None
     unit: Optional[str] = None
@@ -201,6 +203,8 @@ class CostRecordCreate(CostRecordBase):
     pass
 
 class CostRecordUpdate(BaseModel):
+    # 乐观锁: 必须携带读取时的版本号, 不匹配返回 409
+    version: int
     batch_id: Optional[int] = None
     cost_date: Optional[date] = None
     cost_type: Optional[str] = None
@@ -213,10 +217,53 @@ class CostRecordUpdate(BaseModel):
 
 class CostRecordResponse(CostRecordBase):
     id: int
+    entry_kind: str = "expense"
+    status: str = "active"
+    version: int = 1
+    parent_id: Optional[int] = None
     created_at: datetime
+    effective_amount: float = 0.0
 
     class Config:
         orm_mode = True
+
+    @model_validator(mode="after")
+    def _compute_effective_amount(self):
+        sign = -1 if self.entry_kind in ("allowance", "refund") else 1
+        self.effective_amount = round(sign * (self.amount or 0), 2)
+        return self
+
+class CostAdjustmentCreate(BaseModel):
+    """税费/折让/退款: 以关联分录登记, 不覆盖原账。"""
+    kind: str  # tax, allowance, refund
+    amount: float
+    adjustment_date: date
+    description: Optional[str] = None
+    notes: Optional[str] = None
+
+class CostSummaryResponse(BaseModel):
+    total: float
+    count: int
+    by_type: Dict[str, float]
+
+class CostScanIssue(BaseModel):
+    record_id: int
+    issue: str
+    detail: str
+
+class CostScanReport(BaseModel):
+    scanned: int
+    done: bool
+    issues: List[CostScanIssue]
+
+class CostRepairReport(BaseModel):
+    processed: int
+    done: bool
+    fixed: int
+    converted: int
+    flagged: int
+    issues: List[CostScanIssue]
+    next_cursor: Optional[int] = None
 
 class HarvestSaleBase(BaseModel):
     batch_id: int
@@ -309,6 +356,8 @@ class CostRecordTrace(BaseModel):
     cost_type: str
     amount: float
     description: Optional[str] = None
+    entry_kind: Optional[str] = None
+    effective_amount: Optional[float] = None
 
 class HarvestSaleTrace(BaseModel):
     sale_date: date
